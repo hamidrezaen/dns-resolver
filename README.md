@@ -3,4 +3,4 @@ I was watching the Computer Networks course from Sharif University of Technology
 
 I decided to do some of the homework assignments and searched GitHub for the most recent available assignments for this course. I found this repository containing the second practical assignment from the same university and the same instructor in fall 2023.
 
-This program answers A class queries from `dig` command. It reads the domains and their corresponding IPs from `/etc/myhosts` file.this
+This program answers A class queries from `dig` command. It reads the domains and their corresponding IPs from `/etc/myhosts` file.
