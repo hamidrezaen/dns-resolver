@@ -1,8 +1,6 @@
 import socket
 import selectors
 import struct
-import types
-
 
 # create /etc/myhosts
 def create_myhosts():
@@ -17,49 +15,16 @@ def create_myhosts():
         print(f"Permission denied: You need to run this script as root to write to {path}")
 
 
-# Read IPv4s from /etc/hosts
+# Read IPv4s from /etc/myhosts
 ipv4s = []
-path = "/etc/hosts"
-with open(path) as hosts:
-    for line in hosts:
+path = "/etc/myhosts"
+with open(path) as myhosts:
+    for line in myhosts:
         line = line.strip()
         if not line.startswith('#') and line:
             parts = line.split()
             if len(parts) > 1 and parts[0].count('.') == 3:
-                ipv4s.append(line)
-
-
-# accept a new connection
-def accept_wrapper(sock):
-
-    # Because the listening socket was registered for the event selectors.EVENT_READ,
-    # it should be ready to read
-    conn, addr = sock.accept()  
-    print(f"Accepted connection from {addr}")
-    conn.setblocking(False)
-
-    data = types.SimpleNamespace(addr=addr, inb=b"", outb=b"") # !!!
-    events = selectors.EVENT_READ | selectors.EVENT_WRITE
-    sel.register(conn, events, data=data)
-
-
-# handle the events for existing connections
-def service_connection(key, mask):
-    sock = key.fileobj
-    data = key.data
-    if mask & selectors.EVENT_READ:
-        recv_data = sock.recv(1024)  # Should be ready to read
-        if recv_data:
-            parse_message(recv_data)
-        else:
-            print(f"Closing connection to {data.addr}")
-            sel.unregister(sock)
-            sock.close()
-    if mask & selectors.EVENT_WRITE:
-        if data.outb:
-            print(f"Echoing {data.outb!r} to {data.addr}")
-            sent = sock.send(data.outb)  # Should be ready to write
-            data.outb = data.outb[sent:]
+                ipv4s.append(line)            
 
 
 # find ipv4 address from /etc/myhosts
@@ -80,8 +45,43 @@ def parse_message(message):
     dns_id, flags, quescount, anscount, nscount, arcount = header
 
     print(f"ID : {dns_id}, Flags:{flags:016b}, Questions = {quescount}, Answers: {anscount}")
+
+    # start parsing after 12-bytes header
+    offset = 12
+
+    for _ in range(quescount):
+        domain_name, offset = decode_domain_name(message, offset)
+        qtype, qclass = struct.unpack(">HH", message[offset:offset+4])
+        offset += 4
+        print(f"Query for: {domain_name}, Type: {qtype}, Class: {qclass}")
+
+    return{
+        "id" : dns_id,
+        "flags" : flags,
+        "questions" : quescount,
+        "answers" : anscount,
+        "domain": domain_name,
+        "qtype" : qtype,
+        "qclass" : qclass
+    }
+
+
+def decode_domain_name(message, offset):
+    labels = []
+    while True:
+        length = message[offset]
+        if length == 0:
+            offset += 1
+            break
+        labels.append(message[offset+1:offset+length+1].decode())
+        offset += length+1
+    return '.'.join(labels), offset
+
+# for now we just want to answer type A queries
+def create_typeA_answer(message):
     
-    
+# create the myhosts file to read from
+create_myhosts()
 
 # listening on port 5353
 sel = selectors.DefaultSelector()
@@ -94,19 +94,17 @@ print(f"Listening on {(host, port)}")
 sock.setblocking(False)
 sel.register(sock, selectors.EVENT_READ, data=None)
 
-print("listening for UDP on: " + host + ' ' + port)
-
 try:
     while True:
         # wait for events
         events = sel.select(timeout=None)
         for key, mask in events:
-            if key.data is None: # check if this is a new connection request.
-                accept_wrapper(key.fileobj) # accept a new connection
-            else:
-                # handle the events for existing connections
-                service_connection(key, mask)
-
+            sock = key.fileobj
+            if mask & selectors.EVENT_READ:
+                data, addr = sock.recvfrom(512)
+                print(f"Recieved DNS query from {addr}")
+                parsed = parse_message(data)
+                print(parsed)
 except KeyboardInterrupt:
     print("Caught keyboard interrupt, exiting")
 finally:
